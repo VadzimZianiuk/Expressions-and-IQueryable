@@ -25,15 +25,36 @@ namespace Expressions.Task3.E3SQueryProvider
 
         protected override Expression VisitMethodCall(MethodCallExpression node)
         {
-            if (node.Method.DeclaringType == typeof(Queryable)
-                && node.Method.Name == "Where")
+            string format;
+            switch (node.Method.Name)
             {
-                var predicate = node.Arguments[1];
-                Visit(predicate);
-
-                return node;
+                case "Where" when node.Method.DeclaringType == typeof(Queryable):
+                    var predicate = node.Arguments[1];
+                    Visit(predicate);
+                    return node;
+                case "StartsWith":
+                    format = "{0}:({1}*)";
+                    break;
+                case "EndsWith":
+                    format = "{0}:(*{1})";
+                    break;
+                case "Equals":
+                    format = "{0}:({1})";
+                    break;
+                case "Contains":
+                    format = "{0}:(*{1}*)";
+                    break;
+                default:
+                    return base.VisitMethodCall(node);
             }
-            return base.VisitMethodCall(node);
+
+            
+            var expArg = node.Arguments[0];
+            var arg = Expression.Lambda<Func<string>>(expArg).Compile()();
+            var member = (MemberExpression)node.Object;
+            _resultStringBuilder.AppendFormat(format, member.Member.Name, arg);
+
+            return node;
         }
 
         protected override Expression VisitBinary(BinaryExpression node)
@@ -41,16 +62,28 @@ namespace Expressions.Task3.E3SQueryProvider
             switch (node.NodeType)
             {
                 case ExpressionType.Equal:
-                    if (node.Left.NodeType != ExpressionType.MemberAccess)
-                        throw new NotSupportedException($"Left operand should be property or field: {node.NodeType}");
+                    var (left, right) = node.Right.NodeType == ExpressionType.Constant
+                        ? (node.Left, node.Right)
+                        : (node.Right, node.Left);
 
-                    if (node.Right.NodeType != ExpressionType.Constant)
-                        throw new NotSupportedException($"Right operand should be constant: {node.NodeType}");
-
-                    Visit(node.Left);
+                    Visit(left);
                     _resultStringBuilder.Append("(");
-                    Visit(node.Right);
+                    Visit(right);
                     _resultStringBuilder.Append(")");
+                    break;
+                
+                case ExpressionType.AndAlso:
+                case ExpressionType.And:
+                    Visit(node.Left);
+                    _resultStringBuilder.Append(" AND ");
+                    Visit(node.Right);
+                    break;
+
+                case ExpressionType.OrElse:
+                case ExpressionType.Or:
+                    Visit(node.Left);
+                    _resultStringBuilder.Append(" OR ");
+                    Visit(node.Right);
                     break;
 
                 default:
